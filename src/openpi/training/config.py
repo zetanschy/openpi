@@ -870,6 +870,34 @@ _CONFIGS = [
         pytorch_weight_path="/path/to/your/pytorch_weight_path",
         num_train_steps=30_000,
     ),
+    # pi05 + LoRA on soarm101. Serves the checkpoints named
+    # zetanschy/pi05lora_caps_pick_place_soarm_{10000,21000}: the model matches
+    # pi05_i2rt_lora (pi05, both LoRA variants, action_horizon left at the Pi0Config
+    # default of 50), and the data pipeline is the soarm101 one pointed at the dataset
+    # those runs were trained on, so norm stats resolve to
+    # assets/zetanschy/caps_pick_place_v1/norm_stats.json inside the checkpoint.
+    #
+    # Note the repack below maps observation.images.side, while caps_pick_place_v1
+    # actually has front+grip. That only affects reading the dataset (training); at
+    # inference the caller supplies observation/images/side directly, and the SO-101
+    # eval script feeds the grip camera into that slot.
+    TrainConfig(
+        name="pi05_soarm101_lora",
+        model=pi0_config.Pi0Config(
+            pi05=True, paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ),
+        data=LeRobotSoarm101DataConfig(
+            repo_id="zetanschy/caps_pick_place_v1",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=30_000,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True, paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ).get_freeze_filter(),
+        ema_decay=None,
+    ),
     TrainConfig(
         name="pi0_soarm101_lora",
         model=pi0_config.Pi0Config(paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"),
