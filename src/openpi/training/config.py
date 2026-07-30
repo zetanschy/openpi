@@ -921,7 +921,7 @@ _CONFIGS = [
             pi05=True, paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
         ),
         data=LeRobotSoarm101DataConfig(
-            repo_id="soarm101/cap_to_cup_deg",
+            repo_id="zetanschy/cap_to_cup_deg",
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=False,
             wrist_image_key="grip",
