@@ -365,6 +365,11 @@ class LeRobotSoarm101DataConfig(DataConfigFactory):
     """
 
     extra_delta_transform: bool = False
+    # Dataset key holding the second (wrist) view. Soarm101Inputs always calls that
+    # slot "side", but SO-101 datasets recorded with a gripper camera name it "grip",
+    # and reading a key the dataset does not have fails at training time. Inference is
+    # unaffected either way, since the caller supplies observation/images/side directly.
+    wrist_image_key: str = "side"
 
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
@@ -381,7 +386,7 @@ class LeRobotSoarm101DataConfig(DataConfigFactory):
                         # Note: flatten_dict uses / separator, but dataset keys use . separator
                         # Since dataset returns flat keys with ., flatten_dict keeps them as-is
                         "observation/images/front": "observation.images.front",
-                        "observation/images/side": "observation.images.side",
+                        "observation/images/side": f"observation.images.{self.wrist_image_key}",
                         "observation/state": "observation.state",
                         "actions": "action",  # Dataset has "action" (singular), map to "actions" (plural)
                         "prompt": "task",  # Dataset has "task" field, map to "prompt"
@@ -891,6 +896,45 @@ _CONFIGS = [
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=False,
         ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=30_000,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True, paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ).get_freeze_filter(),
+        ema_decay=None,
+    ),
+    # pi05 + LoRA fine-tune on the SO-101 cap-to-cup dataset, sized for a SINGLE GPU.
+    #
+    # Deliberate differences from pi05_soarm101 / pi05_libero, which assume a cluster:
+    #   batch_size 16 (not 256)  — fits one 24-32GB card with LoRA + bf16.
+    #   warmup 1_000, decay over num_train_steps (not 10_000 / 1_000_000) — a 10k-step
+    #     warmup would spend a third of a 30k-step run below peak LR, and a 1M-step
+    #     decay horizon means the LR never actually anneals within the run.
+    #   ema_decay=None and a freeze_filter — required for LoRA, as in pi05_i2rt_lora.
+    #   wrist_image_key="grip" — this dataset's second camera is the gripper cam.
+    #
+    # action_horizon is left at the Pi0Config default of 50 to match the checkpoints
+    # that worked on this arm (they executed 15 of the 50 per chunk at inference).
+    TrainConfig(
+        name="pi05_soarm101_lora_cap_to_cup",
+        model=pi0_config.Pi0Config(
+            pi05=True, paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ),
+        data=LeRobotSoarm101DataConfig(
+            repo_id="soarm101/cap_to_cup_deg",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=False,
+            wrist_image_key="grip",
+        ),
+        batch_size=16,
+        num_workers=8,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000,
+            peak_lr=5e-5,
+            decay_steps=30_000,
+            decay_lr=5e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         num_train_steps=30_000,
         freeze_filter=pi0_config.Pi0Config(
