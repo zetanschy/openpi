@@ -928,6 +928,13 @@ _CONFIGS = [
         ),
         batch_size=16,
         num_workers=8,
+        # Checkpoints here are ~9GB each (params + train_state), and orbax keeps
+        # max_to_keep=1 PLUS every step matching keep_period forever. The defaults
+        # (1000 / 5000) therefore accumulate 5k+10k+15k... and filled a rented box's
+        # disk at step 17000 mid-write. keep_period=None keeps only the newest, so
+        # disk stays ~9GB steady (~18GB peak while a new one is written).
+        save_interval=5_000,
+        keep_period=None,
         lr_schedule=_optimizer.CosineDecaySchedule(
             warmup_steps=1_000,
             peak_lr=5e-5,
